@@ -1,0 +1,281 @@
+// Fresco — Prisma schema (Architecture §8, Essentials §6)
+// Source of truth: PostgreSQL via Supabase.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../lib/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ── Enums ──────────────────────────────────────────────────────────────
+
+enum Role {
+  FARMER
+  CONSUMER
+  WEMA_ANALYST
+  ADMIN
+}
+
+enum ProduceStatus {
+  DRAFT
+  SCANNING
+  SCANNED
+  LISTED
+  SOLD
+  ARCHIVED
+}
+
+enum OrderStatus {
+  PENDING_PAYMENT
+  PAID
+  ACCEPTED
+  PREPARING
+  READY
+  OUT_FOR_DELIVERY
+  DELIVERED
+  COMPLETED
+  CANCELLED
+}
+
+enum PaymentStatus {
+  INITIATED
+  PENDING
+  SUCCESS
+  FAILED
+}
+
+enum ConsentStatus {
+  PENDING
+  GRANTED
+  REVOKED
+}
+
+enum ConsentScope {
+  TRANSACTION_HISTORY
+  REVENUE_HISTORY
+  FULFILLMENT_HISTORY
+  QUALITY_HISTORY
+  CUSTOMER_REPUTATION
+  FEAP
+  PROFILE_MATURITY
+}
+
+enum FinanceRequestStatus {
+  DRAFT
+  SUBMITTED
+  UNDER_REVIEW
+  APPROVED
+  DECLINED
+  DISBURSED
+  REPAID
+}
+
+enum OpportunityType {
+  BUSINESS_ACCOUNT
+  PAYMENT_COLLECTION
+  WORKING_CAPITAL
+  ORDER_FINANCING
+}
+
+enum OpportunityStatus {
+  ACTIVE
+  DISMISSED
+  ACCEPTED
+}
+
+// ── Entities ───────────────────────────────────────────────────────────
+
+model User {
+  id        String   @id @default(uuid())
+  email     String   @unique
+  name      String
+  phone     String?
+  role      Role     @default(FARMER)
+  createdAt DateTime @default(now())
+
+  farmerProfile FarmerProfile?
+  orders        Order[]
+  reviews       Review[]
+}
+
+model FarmerProfile {
+  id            String    @id @default(uuid())
+  userId        String    @unique
+  farmName      String
+  location      String
+  latitude      Float?
+  longitude     Float?
+  primaryProduce String
+  profileImage  String?
+  createdAt     DateTime  @default(now())
+
+  user              User               @relation(fields: [userId], references: [id])
+  produce           Produce[]
+  scans             ProduceScan[]
+  orders            Order[]
+  passport          FinancialPassport?
+  consents          Consent[]
+  financeRequests   FinanceRequest[]
+  opportunities     WemaOpportunity[]
+}
+
+model Produce {
+  id           String        @id @default(uuid())
+  farmerId     String
+  name         String
+  category     String
+  quantity     Int
+  unit         String
+  price        Float
+  imageUrl     String?
+  description  String?
+  status       ProduceStatus @default(DRAFT)
+  batchId      String?
+  frescoScanId String?       @unique
+  createdAt    DateTime      @default(now())
+
+  farmer     FarmerProfile @relation(fields: [farmerId], references: [id])
+  scans      ProduceScan[] @relation("ProduceScans")
+  frescoScan ProduceScan?  @relation("ScanForListing", fields: [frescoScanId], references: [id])
+  orderItems OrderItem[]
+}
+
+model ProduceScan {
+  id                    String   @id @default(uuid())
+  produceId             String?
+  farmerId              String
+  imageUrl              String?
+  detectedProduce       String
+  freshnessScore        Float
+  estimatedShelfLifeDays Int
+  confidence            Float
+  qualityLabel          String?
+  analysisSummary       String?
+  provider              String   @default("mock")
+  createdAt             DateTime @default(now())
+
+  farmer  FarmerProfile @relation(fields: [farmerId], references: [id])
+  produce Produce?      @relation("ProduceScans", fields: [produceId], references: [id])
+  listing Produce?      @relation("ScanForListing")
+}
+
+model Order {
+  id                String      @id @default(uuid())
+  reference         String      @unique
+  consumerId        String
+  farmerId          String
+  subtotal          Float
+  deliveryFee       Float       @default(0)
+  total             Float
+  paymentStatus     PaymentStatus @default(PENDING)
+  status            OrderStatus @default(PENDING_PAYMENT)
+  createdAt         DateTime    @default(now())
+  completedAt       DateTime?
+
+  consumer    User        @relation(fields: [consumerId], references: [id])
+  farmer      FarmerProfile @relation(fields: [farmerId], references: [id])
+  items       OrderItem[]
+  payment     Payment?
+  reviews     Review[]
+  financeRequest FinanceRequest?
+}
+
+model OrderItem {
+  id        String  @id @default(uuid())
+  orderId   String
+  produceId String
+  quantity  Int
+  unitPrice Float
+  total     Float
+
+  order   Order   @relation(fields: [orderId], references: [id])
+  produce Produce @relation(fields: [produceId], references: [id])
+}
+
+model Payment {
+  id        String        @id @default(uuid())
+  orderId   String        @unique
+  provider  String        @default("mock")
+  reference String        @unique
+  amount    Float
+  status    PaymentStatus @default(PENDING)
+  createdAt DateTime      @default(now())
+
+  order Order @relation(fields: [orderId], references: [id])
+}
+
+model Review {
+  id         String   @id @default(uuid())
+  orderId    String
+  farmerId   String
+  consumerId String
+  rating     Int
+  comment    String?
+  createdAt  DateTime @default(now())
+
+  order    Order @relation(fields: [orderId], references: [id])
+  consumer User  @relation(fields: [consumerId], references: [id])
+}
+
+model FinancialPassport {
+  id                String   @id @default(uuid())
+  farmerId          String   @unique
+  lifetimeRevenue   Float    @default(0)
+  recentRevenue     Float    @default(0)
+  transactionCount  Int      @default(0)
+  completedOrders   Int      @default(0)
+  fulfillmentRate   Float    @default(0)
+  customerCount     Int      @default(0)
+  repeatCustomerCount Int    @default(0)
+  averageRating     Float    @default(0)
+  qualityConsistency Float   @default(0)
+  activeMonths      Int      @default(0)
+  feap              Float    @default(0)
+  profileMaturity   Float    @default(0)
+  updatedAt         DateTime @default(now()) @updatedAt
+
+  farmer FarmerProfile @relation(fields: [farmerId], references: [id])
+}
+
+model Consent {
+  id            String        @id @default(uuid())
+  farmerId      String
+  institution   String        @default("Wema Bank")
+  institutionReference String?
+  scopes        ConsentScope[]
+  status        ConsentStatus @default(PENDING)
+  grantedAt     DateTime?
+  revokedAt     DateTime?
+  createdAt     DateTime      @default(now())
+
+  farmer FarmerProfile @relation(fields: [farmerId], references: [id])
+}
+
+model FinanceRequest {
+  id             String               @id @default(uuid())
+  farmerId  String
+  orderId   String?       @unique
+  requestedAmount Float
+  purpose        String?
+  status         FinanceRequestStatus @default(SUBMITTED)
+  createdAt      DateTime             @default(now())
+
+  farmer FarmerProfile @relation(fields: [farmerId], references: [id])
+  order  Order?        @relation(fields: [orderId], references: [id])
+}
+
+model WemaOpportunity {
+  id                 String            @id @default(uuid())
+  farmerId           String
+  type               OpportunityType
+  recommendedAmount  Float?
+  rationale          String
+  triggerMetrics     String?
+  status             OpportunityStatus @default(ACTIVE)
+  createdAt          DateTime          @default(now())
+
+  farmer FarmerProfile @relation(fields: [farmerId], references: [id])
+}

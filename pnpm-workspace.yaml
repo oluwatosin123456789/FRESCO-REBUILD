@@ -1,0 +1,8 @@
+onlyBuiltDependencies:
+  - msw
+  - unrs-resolver
+  - esbuild
+  - sharp
+
+overrides:
+  hono: 4.12.25
